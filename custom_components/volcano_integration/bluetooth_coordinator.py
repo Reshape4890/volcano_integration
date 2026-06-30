@@ -2,6 +2,8 @@
 import asyncio
 import logging
 from bleak import BleakClient, BleakError
+from bleak_retry_connector import establish_connection, BleakNotFoundError
+from homeassistant.components.bluetooth import async_ble_device_from_address
 
 from .const import (
     DOMAIN,
@@ -33,7 +35,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-RECONNECT_INTERVAL = 3
+RECONNECT_INTERVAL = 5
+MAX_RECONNECT_INTERVAL = 300
 TEMP_POLL_INTERVAL = 1
 
 VALID_PATTERNS = {
@@ -53,10 +56,12 @@ class VolcanoBTManager:
     Manages Bluetooth communication with the Volcano device.
     """
 
-    def __init__(self, bt_address: str):
+    def __init__(self, hass, bt_address: str):
+        self._hass = hass
         self.bt_address = bt_address
         self._client = None
         self._connected = False
+        self._reconnect_delay = RECONNECT_INTERVAL
 
         # Device Attributes
         self.current_temperature = None
@@ -76,7 +81,9 @@ class VolcanoBTManager:
         self._run_task = None
         self._temp_poll_task = None
         self._stop_event = asyncio.Event()
+        self._wake_event = asyncio.Event()
         self._sensors = []
+        self.gatt_ready = False
 
     @property
     def bt_status(self):
@@ -127,7 +134,11 @@ class VolcanoBTManager:
         if self._connected:
             _LOGGER.info("Already connected to the device.")
             return
-        await self.start()
+        if self._run_task and not self._run_task.done():
+            self._reconnect_delay = RECONNECT_INTERVAL
+            self._wake_event.set()
+        else:
+            await self.start()
 
     async def async_user_disconnect(self):
         """Explicitly disconnect from the BLE device."""
@@ -142,19 +153,56 @@ class VolcanoBTManager:
         _LOGGER.debug("Entering VolcanoBTManager._run() loop.")
         while not self._stop_event.is_set():
             if not self._connected:
-                await self._connect()
-            await asyncio.sleep(1)
+                try:
+                    await self._connect()
+                except Exception:
+                    _LOGGER.exception("Unexpected error during connect; will back off and retry.")
+                    self.bt_status = BT_STATUS_ERROR
+                    self._connected = False
+                if self._connected:
+                    self._reconnect_delay = RECONNECT_INTERVAL
+                else:
+                    _LOGGER.debug("Reconnect in %.0fs", self._reconnect_delay)
+                    self._wake_event.clear()
+                    tasks = {
+                        asyncio.ensure_future(self._stop_event.wait()),
+                        asyncio.ensure_future(self._wake_event.wait()),
+                    }
+                    _, pending = await asyncio.wait(tasks, timeout=self._reconnect_delay, return_when=asyncio.FIRST_COMPLETED)
+                    for t in pending:
+                        t.cancel()
+                    self._reconnect_delay = min(self._reconnect_delay * 2, MAX_RECONNECT_INTERVAL)
+            else:
+                await asyncio.sleep(1)
         _LOGGER.debug("Exiting VolcanoBTManager._run() -> disconnecting.")
         await self._disconnect()
 
+    def _on_disconnect(self, client: BleakClient) -> None:
+        """Called by bleak when the BLE link drops unexpectedly."""
+        _LOGGER.warning("Unexpected BLE disconnect from %s", self.bt_address)
+        self.gatt_ready = False
+        self._connected = False
+        self.bt_status = BT_STATUS_DISCONNECTED
+
     async def _connect(self):
         """Attempt to connect to the BLE device."""
+        self.gatt_ready = False
         try:
+            ble_device = async_ble_device_from_address(self._hass, self.bt_address, connectable=True)
+            if ble_device is None:
+                _LOGGER.debug("Device %s not visible to HA scanner; will retry.", self.bt_address)
+                self.bt_status = BT_STATUS_DISCONNECTED
+                return
+
             _LOGGER.info("Attempting to connect to Bluetooth device %s...", self.bt_address)
             self.bt_status = BT_STATUS_CONNECTING
-            self._client = BleakClient(self.bt_address)
-
-            await self._client.connect(timeout=30.0)
+            self._client = await establish_connection(
+                BleakClient,
+                ble_device,
+                self.bt_address,
+                disconnected_callback=self._on_disconnect,
+                max_attempts=1,
+            )
 
             self._connected = self._client.is_connected
             if self._connected:
@@ -162,6 +210,7 @@ class VolcanoBTManager:
                 self.bt_status = BT_STATUS_CONNECTED
 
                 # Read all required characteristics
+                self.ble_firmware_version = None  # sentinel: None after reads = GATT failed
                 await self._read_ble_firmware_version()
                 await self._read_serial_number()
                 await self._read_firmware_version()
@@ -173,26 +222,35 @@ class VolcanoBTManager:
                 await self._read_vibration()
                 await self._subscribe_pump_notifications()
 
+                # GATT is usable only if characteristic discovery succeeded.
+                # ble_firmware_version stays None if the GATT table was empty
+                # (stale BlueZ cache after an unclean restart).
+                if self.ble_firmware_version is not None:
+                    self.gatt_ready = True
+                    _LOGGER.info("GATT services ready.")
+                else:
+                    _LOGGER.warning(
+                        "GATT service discovery failed — characteristics not found. "
+                        "Disconnecting to force retry."
+                    )
+                    await self._disconnect()
+
             else:
                 self.bt_status = BT_STATUS_DISCONNECTED
 
         except asyncio.TimeoutError as e:
-            # Timeout is not necessarily missing hardware
             if "No adapter found" in str(e) or "adapter" in str(e).lower():
                 _LOGGER.error("Missing bluetooth adapter: %s", e)
             else:
                 _LOGGER.warning("Bluetooth connection timed out to %s: %s", self.bt_address, e)
             self.bt_status = BT_STATUS_ERROR
-            await asyncio.sleep(RECONNECT_INTERVAL)
 
-        except BleakError as e:
-            # Check if it's a missing adapter vs other connection errors
+        except (BleakError, BleakNotFoundError) as e:
             if "No adapter found" in str(e) or "adapter" in str(e).lower():
                 _LOGGER.error("Missing bluetooth adapter: %s", e)
             else:
                 _LOGGER.warning("Bluetooth connection error: %s -> Retrying...", e)
             self.bt_status = BT_STATUS_ERROR
-            await asyncio.sleep(RECONNECT_INTERVAL)
 
     async def _read_ble_firmware_version(self):
         """Read the BLE Firmware Version characteristic."""
@@ -204,8 +262,8 @@ class VolcanoBTManager:
             self.ble_firmware_version = data.decode("utf-8").strip()
             _LOGGER.info("BLE Firmware Version: %s", self.ble_firmware_version)
             self._notify_sensors()
-        except BleakError as e:
-            if "No adapter found" in str(e) or "adapter" in str(e).lower():
+        except (BleakError, UnicodeDecodeError) as e:
+            if isinstance(e, BleakError) and ("No adapter found" in str(e) or "adapter" in str(e).lower()):
                 _LOGGER.error("Missing bluetooth adapter while reading BLE Firmware Version: %s", e)
             else:
                 _LOGGER.warning("Error reading BLE Firmware Version: %s", e)
@@ -221,8 +279,8 @@ class VolcanoBTManager:
             self.serial_number = data.decode("utf-8").strip()
             _LOGGER.info("Serial Number: %s", self.serial_number)
             self._notify_sensors()
-        except BleakError as e:
-            if "No adapter found" in str(e) or "adapter" in str(e).lower():
+        except (BleakError, UnicodeDecodeError) as e:
+            if isinstance(e, BleakError) and ("No adapter found" in str(e) or "adapter" in str(e).lower()):
                 _LOGGER.error("Missing bluetooth adapter while reading Serial Number: %s", e)
             else:
                 _LOGGER.warning("Error reading Serial Number: %s", e)
@@ -238,8 +296,8 @@ class VolcanoBTManager:
             self.firmware_version = data.decode("utf-8").strip()
             _LOGGER.info("Firmware Version: %s", self.firmware_version)
             self._notify_sensors()
-        except BleakError as e:
-            if "No adapter found" in str(e) or "adapter" in str(e).lower():
+        except (BleakError, UnicodeDecodeError) as e:
+            if isinstance(e, BleakError) and ("No adapter found" in str(e) or "adapter" in str(e).lower()):
                 _LOGGER.error("Missing bluetooth adapter while reading Firmware Version: %s", e)
             else:
                 _LOGGER.warning("Error reading Firmware Version: %s", e)
@@ -408,6 +466,7 @@ class VolcanoBTManager:
 
     async def _disconnect(self):
         """Disconnect from the BLE device."""
+        self.gatt_ready = False
         if self._client:
             try:
                 _LOGGER.debug("Disconnecting from Bluetooth device %s...", self.bt_address)

@@ -4,6 +4,7 @@ import asyncio
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from .const import DOMAIN
 import voluptuous as vol
@@ -75,7 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     bt_address = entry.data.get("bt_address")
     device_name = entry.data.get("device_name", "Volcano Vaporizer")
 
-    manager = VolcanoBTManager(bt_address)
+    manager = VolcanoBTManager(hass, bt_address)
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = manager
 
@@ -104,6 +105,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         else:
             _LOGGER.info("Device already disconnected.")
 
+    async def _wait_for_write_ready(timeout=5.0):
+        """Wait briefly for a usable connection before writing.
+
+        Returns True when CONNECTED+gatt_ready. Returns False immediately if
+        cleanly DISCONNECTED (no point waiting). Waits through CONNECTING/ERROR
+        so mid-script reconnects can recover before the write fires.
+        """
+        elapsed = 0.0
+        while elapsed < timeout:
+            if manager.bt_status == "CONNECTED" and manager.gatt_ready:
+                return True
+            if manager.bt_status == "DISCONNECTED":
+                return False
+            await asyncio.sleep(0.25)
+            elapsed += 0.25
+        return False
+
     async def handle_pump_on(call):
         """Handle the pump_on service."""
         _LOGGER.debug("Service 'pump_on' called.")
@@ -112,11 +130,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     async def handle_pump_off(call):
         """Handle the pump_off service."""
         _LOGGER.debug("Service 'pump_off' called.")
+        if not await _wait_for_write_ready():
+            _LOGGER.warning("pump_off: no usable connection — write skipped.")
+            return
         await manager.write_gatt_command(UUID_PUMP_OFF, payload=b"\x00")
 
     async def handle_heat_on(call):
         """Handle the heat_on service."""
         _LOGGER.debug("Service 'heat_on' called.")
+        if not await _wait_for_write_ready():
+            _LOGGER.warning("heat_on: no usable connection — write skipped.")
+            return
         await manager.write_gatt_command(UUID_HEAT_ON, payload=b"\x01")
 
     async def handle_heat_off(call):
@@ -138,18 +162,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         """Wait until the current temperature reaches or exceeds the target temperature."""
         timeout = 300  # 5 minutes
         elapsed_time = 0
+        consecutive_confirmations = 0
+        CONFIRMATIONS_REQUIRED = 3  # guard against stale setpoint broadcast on first connect
         _LOGGER.debug(f"Waiting for temperature to reach {target_temp}°C with timeout {timeout}s")
 
         while elapsed_time < timeout:
             if manager.current_temperature is not None:
-                _LOGGER.debug(
-                    f"Current temperature is {manager.current_temperature}°C; target is {target_temp}°C"
-                )
-                if manager.current_temperature >= target_temp:
-                    _LOGGER.info(f"Target temperature {target_temp}°C reached.")
-                    return
+                if manager.current_temperature > 300:
+                    _LOGGER.debug(
+                        f"Ignoring garbage temperature reading: {manager.current_temperature}°C"
+                    )
+                    consecutive_confirmations = 0
+                else:
+                    _LOGGER.debug(
+                        f"Current temperature is {manager.current_temperature}°C; target is {target_temp}°C"
+                    )
+                    if manager.current_temperature >= target_temp:
+                        consecutive_confirmations += 1
+                        _LOGGER.debug(
+                            f"Temperature at or above target ({consecutive_confirmations}/{CONFIRMATIONS_REQUIRED} confirmations)"
+                        )
+                        if consecutive_confirmations >= CONFIRMATIONS_REQUIRED:
+                            _LOGGER.info(f"Target temperature {target_temp}°C confirmed reached.")
+                            return
+                    else:
+                        consecutive_confirmations = 0
             else:
                 _LOGGER.warning("Current temperature is None; retrying...")
+                consecutive_confirmations = 0
 
             await asyncio.sleep(0.5)
             elapsed_time += 0.5
@@ -158,22 +198,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     # NEW: Wait until connected helper function
     async def wait_until_connected(hass: HomeAssistant, manager: VolcanoBTManager):
-        """Wait until the Bluetooth manager is connected."""
+        """Wait until the Bluetooth manager is connected.
+
+        Transient ERRORs are tolerated — the coordinator retries internally.
+        Only raises if we never reach CONNECTED within the timeout.
+        """
         timeout = 30  # 30 seconds
         elapsed_time = 0
         _LOGGER.debug(f"Waiting for Bluetooth to connect with timeout {timeout}s")
 
         while elapsed_time < timeout:
-            if manager.bt_status == "CONNECTED":
+            if manager.bt_status == "CONNECTED" and manager.gatt_ready:
                 _LOGGER.info("Bluetooth connection established.")
-                return
-            elif manager.bt_status == "ERROR":
-                _LOGGER.warning("Bluetooth connection encountered an error.")
                 return
             await asyncio.sleep(0.5)
             elapsed_time += 0.5
 
         _LOGGER.warning("Timeout reached while waiting for Bluetooth to connect.")
+        raise HomeAssistantError(
+            "Volcano: Bluetooth connection timed out — device may be off or out of range."
+        )
 
     # -------------------------------------------------
     # NEW Services Handlers

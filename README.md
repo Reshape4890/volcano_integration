@@ -1,30 +1,16 @@
 # Storz & Bickel Volcano Hybrid Integration for Home Assistant
 
-[![HACS](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/default/tree/master/integration/Chuffnugget-volcano_integration)
-[![HACS installs](https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=HACS%20installs&cacheSeconds=86400&url=https%3A%2F%2Fanalytics.home-assistant.io%2Fcustom_integrations.json&query=$.volcano_integration.total)](https://github.com/hacs/default/tree/main/integration/Chuffnugget-volcano_integration)
-[![HACS Action](https://github.com/Chuffnugget/volcano_integration/actions/workflows/validate.yaml/badge.svg)](https://github.com/Chuffnugget/volcano_integration/actions/workflows/validate.yaml)
-[![hassfest](https://github.com/Chuffnugget/volcano_integration/actions/workflows/hassfest.yaml/badge.svg)](https://github.com/Chuffnugget/volcano_integration/actions/workflows/hassfest.yaml)
-[![Release](https://img.shields.io/github/v/release/Chuffnugget/volcano_integration)](https://github.com/Chuffnugget/volcano_integration/releases)
-[![License](https://img.shields.io/github/license/Chuffnugget/volcano_integration)](https://github.com/Chuffnugget/volcano_integration/blob/master/LICENSE)
-[![PayPal.Me](https://img.shields.io/badge/PayPal.Me-chuffnugget-00457C?logo=paypal)](https://www.paypal.me/chuffnugget)
-
-<a href="https://coff.ee/chuffnugget" target="_blank">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40" />
-</a>
-
 A custom **Home Assistant integration** to connect and control the **Storz & Bickel Volcano Hybrid Vaporizer** via **Bluetooth**. This integration enables precise control over the vaporizer's heat and pump functions, real-time monitoring of temperature, and seamless automation into the Home Assistant scripting and automation systems.
 
-> 🚀 **Volcano Integration is now published in the HACS Default Store!**  
-> If you previously added it as a custom repository, you can remove that entry under **HACS → Integrations → ⋮ → Custom Repositories** to avoid duplicates.
+This is a fork of [Chuffnugget/volcano_integration](https://github.com/Chuffnugget/volcano_integration) (v3.2.4), maintained with bug fixes.
 
 One of the main features of the official Volcano app includes workflows; these are the real-time Bluetooth instructions usually sent from your mobile device to the vaporizer when using it. But, because these instructions are sent in real-time, it means that closing or sometimes even minimizing the app actually stops the workflow prematurely. This integration fixes that by using Home Assistant as the Bluetooth client instead of your mobile device; the connection is persistent and asynchronous. This allows us to utilize Home Assistant scripts and automations in the same way we would create a workflow.
-
-[![Open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=chuffnugget&repository=volcano_integration&category=integration)
 
 Home Assistant WebUI - Volcano Device Page
 ![volcano](https://github.com/user-attachments/assets/760427f6-65d0-484c-b7c7-76dfc21e16e4)
 
 ---
+
 The default workflow in the official app is as follows:
 
 ```
@@ -39,10 +25,9 @@ The default workflow in the official app is as follows:
 - Repeats until temperature reaches 200C.
 ```
 
-
 To translate this into a Home Assistant script:
 
-```
+```yaml
 alias: Volcano Workflow 1
 sequence:
   - action: volcano_integration.connect
@@ -97,10 +82,7 @@ sequence:
   - action: volcano_integration.pump_on
     data: {}
   - delay:
-      hours: 0
-      minutes: 0
       seconds: 5
-      milliseconds: 0
   - action: volcano_integration.pump_off
     data: {}
   - action: volcano_integration.set_temperature
@@ -131,7 +113,7 @@ mode: restart
 
 I also strongly recommend creating another script, which allows you to stop any Volcano workflow at will. It should also turn the heat and pump off:
 
-```
+```yaml
 alias: Volcano Stop All Scripts
 sequence:
   - action: volcano_integration.heat_off
@@ -156,7 +138,7 @@ Now you're set to create your own scripts and automations for the Volcano Vapori
 - **Pump Control**: Turn the pump **ON** or **OFF** to start or stop air circulation.  
 - **Heat Control**: Turn the heater **ON** or **OFF**.  
 - **LED Brightness Control**: Adjust the LED brightness between 0% and 100%.  
-- **Auto Shutoff Setting**: Configure how long until the Volcano automatically turns off, in minutes.  
+- **Auto Shutoff Setting**: Configure how long until the Volcano automatically turns off the heater and pump (Bluetooth and device power remain on), in minutes.  
 - **Real-Time Temperature Monitoring**: Monitor the current heater temperature in real time.  
 - **Bluetooth Status**: View the current Bluetooth connection status (Connected, Disconnected, etc.).  
 - **Firmware and Serial Information**: Access BLE firmware version, device firmware version, and serial number.  
@@ -176,42 +158,20 @@ Now you're set to create your own scripts and automations for the Volcano Vapori
 
 ## Installation
 
-### Installation via HACS (Default Store)
+### Via HACS (Custom Repository)
 
-1. **Prerequisites**  
-   - Ensure you have [HACS](https://hacs.xyz/) installed in your Home Assistant.
+1. In Home Assistant, go to **HACS → Integrations → ⋮ → Custom Repositories**
+2. Add `https://github.com/Reshape4890/volcano_integration` as an **Integration**
+3. Search for **Volcano Integration** and install
+4. Restart Home Assistant
 
-2. **Install the Integration**
-   - In Home Assistant, go to **HACS → Integrations**.  
-   - Click the **“+”** button and search for **Volcano Integration**.  
-   - Click **Install**.
-     
-[![Open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=chuffnugget&repository=volcano_integration&category=integration)
+### Manual Installation
 
-
-4. **Restart Home Assistant**  
-   - After installation completes, restart Home Assistant to activate the integration.
-
-5. **Configure the Integration**  
-   - Navigate to **Settings → Devices & Services**, click **Add Integration**, and select **Volcano Integration**.  
-   - Follow the on-screen prompts to scan for Bluetooth devices and pick your Volcano Vaporizer.
-
----
-
-### Manual Installation (Fallback)
-
-1. **Download the Integration**  
-   - Clone or download from GitHub:  
-     `https://github.com/Chuffnugget/volcano_integration`
-
-2. **Place in Custom Components**  
-   - Copy the `volcano_integration` folder into your Home Assistant’s `custom_components/` directory.
-
-3. **Restart Home Assistant**  
-   - Restart Home Assistant so it picks up the new component.
-
-4. **Add & Configure**  
-   - Go to **Settings → Devices & Services → Add Integration**, choose **Volcano Integration**, and complete setup.
+1. Clone or download this repository:  
+   `https://github.com/Reshape4890/volcano_integration`
+2. Copy the `volcano_integration` folder into your Home Assistant's `custom_components/` directory
+3. Restart Home Assistant
+4. Go to **Settings → Devices & Services → Add Integration**, choose **Volcano Integration**, and complete setup
 
 ---
 
@@ -260,27 +220,23 @@ Now you're set to create your own scripts and automations for the Volcano Vapori
 - **`volcano_integration.set_auto_shutoff_setting`**  
   Set the auto shutoff time in minutes.  
   - **Parameters**  
-    - `minutes` (required): The duration in minutes before auto shutoff is triggered (e.g., 30–360).
+    - `minutes` (required): The duration in minutes before auto shutoff triggers (e.g., 30–360).
 
 ---
 
 ## Troubleshooting
 
 - **Bluetooth Adapter**  
-  Ensure your system recognizes and can use the Bluetooth adapter. If the adapter isn’t detected, the integration won’t be able to connect.
-  
+  Ensure your system recognizes and can use the Bluetooth adapter. If the adapter isn't detected, the integration won't be able to connect.
+
 - **Proximity**  
   Keep the Volcano within a reasonable range of the Bluetooth adapter to prevent connectivity issues.
-  
+
 - **Logs**  
-  Check Home Assistant’s logs for debug messages. Increasing the log level for `custom_components.volcano_integration` can help diagnose connection problems.
+  Check Home Assistant's logs for debug messages. Increasing the log level for `custom_components.volcano_integration` can help diagnose connection problems.
 
 ---
 
 ## Contributing
 
-All contributions, including bug reports, new features, and documentation improvements are welcome. Please file issues on GitHub and/or submit PRs with your proposed changes.
-
----
-
-**Enjoy creating your own custom workflows and happy vaping!**
+Bug reports, fixes, and documentation improvements are welcome. Please file issues on GitHub and/or submit PRs with your proposed changes.
