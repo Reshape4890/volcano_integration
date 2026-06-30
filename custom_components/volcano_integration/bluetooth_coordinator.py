@@ -6,15 +6,10 @@ from bleak_retry_connector import establish_connection, BleakNotFoundError
 from homeassistant.components.bluetooth import async_ble_device_from_address
 
 from .const import (
-    DOMAIN,
     BT_STATUS_DISCONNECTED,
     BT_STATUS_CONNECTING,
     BT_STATUS_CONNECTED,
     BT_STATUS_ERROR,
-    VIBRATION_BIT_MASK,
-    REGISTER1_UUID,          # Pump Notifications
-    REGISTER2_UUID,          # [Specify Purpose]
-    REGISTER3_UUID,          # Vibration Control
     UUID_TEMP,               # Current Temperature
     UUID_PUMP_NOTIFICATIONS, # Pump Notifications
     UUID_PUMP_ON,            # Pump On
@@ -30,7 +25,6 @@ from .const import (
     UUID_LED_BRIGHTNESS,            # LED Brightness
     UUID_HOURS_OF_OPERATION,        # Hours of Operation
     UUID_MINUTES_OF_OPERATION,      # Minutes of Operation
-    UUID_VIBRATION,                 # Vibration Control
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,12 +64,10 @@ class VolcanoBTManager:
         self.ble_firmware_version = None
         self.serial_number = None
         self.firmware_version = None
-        self.auto_shut_off = None
         self.auto_shut_off_setting = None
         self.led_brightness = None
         self.hours_of_operation = None
         self.minutes_of_operation = None
-        self.vibration = None
 
         self._bt_status = BT_STATUS_DISCONNECTED
         self._run_task = None
@@ -178,8 +170,11 @@ class VolcanoBTManager:
         await self._disconnect()
 
     def _on_disconnect(self, client: BleakClient) -> None:
-        """Called by bleak when the BLE link drops unexpectedly."""
-        _LOGGER.warning("Unexpected BLE disconnect from %s", self.bt_address)
+        """Called by bleak when the BLE link drops."""
+        if self._stop_event.is_set():
+            _LOGGER.debug("BLE disconnect from %s (user-initiated)", self.bt_address)
+        else:
+            _LOGGER.warning("Unexpected BLE disconnect from %s", self.bt_address)
         self.gatt_ready = False
         self._connected = False
         self.bt_status = BT_STATUS_DISCONNECTED
@@ -214,12 +209,10 @@ class VolcanoBTManager:
                 await self._read_ble_firmware_version()
                 await self._read_serial_number()
                 await self._read_firmware_version()
-                await self._read_auto_shut_off()
                 await self._read_auto_shut_off_setting()
                 await self._read_led_brightness()
                 await self._read_hours_of_operation()
                 await self._read_minutes_of_operation()
-                await self._read_vibration()
                 await self._subscribe_pump_notifications()
 
                 # GATT is usable only if characteristic discovery succeeded.
@@ -302,26 +295,6 @@ class VolcanoBTManager:
             else:
                 _LOGGER.warning("Error reading Firmware Version: %s", e)
             self.firmware_version = None
-
-    async def _read_auto_shut_off(self):
-        """Read the Auto Shutoff characteristic (0x00=OFF, 0x01=ON)."""
-        if not self._connected or not self._client:
-            _LOGGER.warning("Cannot read Auto Shutoff - not connected.")
-            return
-        try:
-            data = await self._client.read_gatt_char(UUID_AUTO_SHUT_OFF)
-            if data:
-                self.auto_shut_off = "ON" if data[0] == 1 else "OFF"
-            else:
-                self.auto_shut_off = None
-            _LOGGER.info("Auto Shutoff: %s", self.auto_shut_off)
-            self._notify_sensors()
-        except BleakError as e:
-            if "No adapter found" in str(e) or "adapter" in str(e).lower():
-                _LOGGER.error("Missing bluetooth adapter while reading Auto Shutoff: %s", e)
-            else:
-                _LOGGER.warning("Error reading Auto Shutoff: %s", e)
-            self.auto_shut_off = None
 
     async def _read_auto_shut_off_setting(self):
         """Read the Auto Shutoff Setting characteristic (2-byte: seconds)."""
@@ -529,23 +502,6 @@ class VolcanoBTManager:
             else:
                 _LOGGER.warning("Error writing LED brightness: %s", e)
 
-    async def set_auto_shutoff(self, enabled: bool):
-        """Enable/Disable Auto Shutoff by writing 0x01 (ON) or 0x00 (OFF)."""
-        if not self._connected or not self._client:
-            _LOGGER.warning("Cannot set Auto Shutoff - not connected.")
-            return
-        payload = b"\x01" if enabled else b"\x00"
-        try:
-            await self._client.write_gatt_char(UUID_AUTO_SHUT_OFF, payload)
-            self.auto_shut_off = "ON" if enabled else "OFF"
-            self._notify_sensors()
-            _LOGGER.info("Auto Shutoff set to %s", self.auto_shut_off)
-        except BleakError as e:
-            if "No adapter found" in str(e) or "adapter" in str(e).lower():
-                _LOGGER.error("Missing bluetooth adapter while writing Auto Shutoff: %s", e)
-            else:
-                _LOGGER.warning("Error writing Auto Shutoff: %s", e)
-
     async def set_auto_shutoff_setting(self, minutes: int):
         """Write the Auto Shutoff Setting in minutes (converted to seconds)."""
         if not self._connected or not self._client:
@@ -566,72 +522,4 @@ class VolcanoBTManager:
             else:
                 _LOGGER.warning("Error writing Auto Shutoff Setting: %s", e)
 
-    async def set_vibration(self, enabled: bool):
-        """Set vibration by modifying only the vibration bit in the control register."""
-        if not self._connected or not self._client:
-            _LOGGER.warning("Cannot set vibration - not connected.")
-            return
 
-        try:
-            control_data = await self._client.read_gatt_char(REGISTER3_UUID)
-            _LOGGER.debug("Current control register (REGISTER3_UUID): %s (len=%d)", control_data.hex(), len(control_data))
-
-            if len(control_data) < 4:
-                _LOGGER.warning("Received incomplete control register data: %s", control_data.hex())
-                return
-
-            control_value = int.from_bytes(control_data[:4], byteorder="little")
-            _LOGGER.debug("Control register as integer: 0x{0:08x}".format(control_value))
-
-            if enabled:
-                new_control_value = control_value | VIBRATION_BIT_MASK
-            else:
-                new_control_value = control_value & (~VIBRATION_BIT_MASK)
-
-            new_control_data = new_control_value.to_bytes(4, byteorder="little")
-            _LOGGER.debug("Writing new control register: %s", new_control_data.hex())
-
-            await self._client.write_gatt_char(REGISTER3_UUID, new_control_data)
-            _LOGGER.info("Vibration write operation completed.")
-
-            await self._read_vibration()
-
-            self.vibration = "ON" if enabled else "OFF"
-            self._notify_sensors()
-            _LOGGER.info("Vibration set to %s", self.vibration)
-
-        except BleakError as e:
-            if "No adapter found" in str(e) or "adapter" in str(e).lower():
-                _LOGGER.error("Missing bluetooth adapter while setting vibration: %s", e)
-            else:
-                _LOGGER.warning("Error setting vibration: %s", e)
-
-    async def _read_vibration(self):
-        """Read the vibration state from the control register."""
-        if not self._connected or not self._client:
-            _LOGGER.warning("Cannot read vibration - not connected.")
-            return
-        try:
-            control_data = await self._client.read_gatt_char(REGISTER3_UUID)
-            _LOGGER.debug("Vibration read raw data: %s (len=%d)", control_data.hex(), len(control_data))
-
-            if len(control_data) < 4:
-                _LOGGER.warning("Received incomplete control register data for vibration: %s", control_data.hex())
-                self.vibration = None
-            else:
-                control_value = int.from_bytes(control_data[:4], byteorder="little")
-                _LOGGER.debug("Control register as integer: 0x{0:08x}".format(control_value))
-                if control_value & VIBRATION_BIT_MASK:
-                    self.vibration = "ON"
-                else:
-                    self.vibration = "OFF"
-
-            _LOGGER.info("Vibration (read): %s", self.vibration)
-            self._notify_sensors()
-
-        except BleakError as e:
-            if "No adapter found" in str(e) or "adapter" in str(e).lower():
-                _LOGGER.error("Missing bluetooth adapter while reading vibration: %s", e)
-            else:
-                _LOGGER.warning("Error reading vibration: %s", e)
-            self.vibration = None

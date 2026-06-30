@@ -22,7 +22,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "button", "number", "switch"]
+PLATFORMS = ["sensor", "button", "number"]
 
 # -------------------------------------------------
 # Existing Service Name Constants
@@ -89,7 +89,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     async def handle_connect(call):
         """Handle the connect service."""
         _LOGGER.debug("Service 'connect' called.")
-        wait = call.data.get("wait_until_connected", False)
+        wait = call.data.get("wait_until_connected", True)
         if not manager._connected:
             await manager.async_user_connect()
             if wait:

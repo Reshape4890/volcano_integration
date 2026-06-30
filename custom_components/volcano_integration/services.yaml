@@ -5,7 +5,7 @@ connect:
       name: "Wait Until Connected"
       description: "Whether to block until the device is fully connected."
       required: false
-      default: false
+      default: true
       selector:
         boolean: {}
 

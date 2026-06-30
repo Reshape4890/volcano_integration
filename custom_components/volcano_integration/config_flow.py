@@ -1,10 +1,8 @@
 """config_flow.py - Volcano Integration for Home Assistant."""
 import logging
-import asyncio
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectSelectorMode
 
