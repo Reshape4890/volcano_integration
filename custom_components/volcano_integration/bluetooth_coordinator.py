@@ -454,6 +454,22 @@ class VolcanoBTManager:
         self._connected = False
         self.bt_status = BT_STATUS_DISCONNECTED
 
+    async def wait_for_write_ready(self, timeout: float = 5.0) -> bool:
+        """Wait briefly for a usable connection before writing.
+
+        Returns True when CONNECTED+gatt_ready. Returns False immediately if
+        cleanly DISCONNECTED (no point waiting), or on timeout.
+        """
+        elapsed = 0.0
+        while elapsed < timeout:
+            if self.bt_status == BT_STATUS_CONNECTED and self.gatt_ready:
+                return True
+            if self.bt_status == BT_STATUS_DISCONNECTED:
+                return False
+            await asyncio.sleep(0.25)
+            elapsed += 0.25
+        return False
+
     async def write_gatt_command(self, write_uuid: str, payload: bytes = b""):
         """Write a payload to a GATT characteristic."""
         if not self._connected or not self._client:

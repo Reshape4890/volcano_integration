@@ -1,6 +1,7 @@
 """button.py - Volcano Integration for Home Assistant."""
 import logging
 from homeassistant.components.button import ButtonEntity
+from homeassistant.exceptions import HomeAssistantError
 from . import DOMAIN
 
 from .const import (
@@ -109,6 +110,9 @@ class VolcanoPumpOnButton(VolcanoBaseButton):
     async def async_press(self):
         """Handle button press."""
         _LOGGER.debug("VolcanoPumpOnButton pressed.")
+        if not await self._manager.wait_for_write_ready():
+            _LOGGER.warning("Pump On button: no usable connection — write skipped.")
+            raise HomeAssistantError("Volcano: pump_on failed — connection not ready.")
         await self._manager.write_gatt_command(UUID_PUMP_ON, payload=b"\x01")
 
 
@@ -129,6 +133,9 @@ class VolcanoPumpOffButton(VolcanoBaseButton):
     async def async_press(self):
         """Handle button press."""
         _LOGGER.debug("VolcanoPumpOffButton pressed.")
+        if not await self._manager.wait_for_write_ready():
+            _LOGGER.warning("Pump Off button: no usable connection — write skipped.")
+            raise HomeAssistantError("Volcano: pump_off failed — connection not ready.")
         await self._manager.write_gatt_command(UUID_PUMP_OFF, payload=b"\x00")
 
 
@@ -149,6 +156,9 @@ class VolcanoHeatOnButton(VolcanoBaseButton):
     async def async_press(self):
         """Handle button press."""
         _LOGGER.debug("VolcanoHeatOnButton pressed.")
+        if not await self._manager.wait_for_write_ready():
+            _LOGGER.warning("Heat On button: no usable connection — write skipped.")
+            raise HomeAssistantError("Volcano: heat_on failed — connection not ready.")
         await self._manager.write_gatt_command(UUID_HEAT_ON, payload=b"\x01")
 
 
@@ -169,4 +179,7 @@ class VolcanoHeatOffButton(VolcanoBaseButton):
     async def async_press(self):
         """Handle button press."""
         _LOGGER.debug("VolcanoHeatOffButton pressed.")
+        if not await self._manager.wait_for_write_ready():
+            _LOGGER.warning("Heat Off button: no usable connection — write skipped.")
+            raise HomeAssistantError("Volcano: heat_off failed — connection not ready.")
         await self._manager.write_gatt_command(UUID_HEAT_OFF, payload=b"\x00")

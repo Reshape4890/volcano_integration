@@ -105,47 +105,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         else:
             _LOGGER.info("Device already disconnected.")
 
-    async def _wait_for_write_ready(timeout=5.0):
-        """Wait briefly for a usable connection before writing.
-
-        Returns True when CONNECTED+gatt_ready. Returns False immediately if
-        cleanly DISCONNECTED (no point waiting). Waits through CONNECTING/ERROR
-        so mid-script reconnects can recover before the write fires.
-        """
-        elapsed = 0.0
-        while elapsed < timeout:
-            if manager.bt_status == "CONNECTED" and manager.gatt_ready:
-                return True
-            if manager.bt_status == "DISCONNECTED":
-                return False
-            await asyncio.sleep(0.25)
-            elapsed += 0.25
-        return False
-
     async def handle_pump_on(call):
         """Handle the pump_on service."""
         _LOGGER.debug("Service 'pump_on' called.")
+        if not await manager.wait_for_write_ready():
+            _LOGGER.warning("pump_on: no usable connection — write skipped.")
+            raise HomeAssistantError(
+                "Volcano: pump_on failed — connection not ready."
+            )
         await manager.write_gatt_command(UUID_PUMP_ON, payload=b"\x01")
 
     async def handle_pump_off(call):
         """Handle the pump_off service."""
         _LOGGER.debug("Service 'pump_off' called.")
-        if not await _wait_for_write_ready():
+        if not await manager.wait_for_write_ready():
             _LOGGER.warning("pump_off: no usable connection — write skipped.")
-            return
+            raise HomeAssistantError(
+                "Volcano: pump_off failed — connection not ready."
+            )
         await manager.write_gatt_command(UUID_PUMP_OFF, payload=b"\x00")
 
     async def handle_heat_on(call):
         """Handle the heat_on service."""
         _LOGGER.debug("Service 'heat_on' called.")
-        if not await _wait_for_write_ready():
+        if not await manager.wait_for_write_ready():
             _LOGGER.warning("heat_on: no usable connection — write skipped.")
-            return
+            raise HomeAssistantError(
+                "Volcano: heat_on failed — connection not ready."
+            )
         await manager.write_gatt_command(UUID_HEAT_ON, payload=b"\x01")
 
     async def handle_heat_off(call):
         """Handle the heat_off service."""
         _LOGGER.debug("Service 'heat_off' called.")
+        if not await manager.wait_for_write_ready():
+            _LOGGER.warning("heat_off: no usable connection — write skipped.")
+            raise HomeAssistantError(
+                "Volcano: heat_off failed — connection not ready."
+            )
         await manager.write_gatt_command(UUID_HEAT_OFF, payload=b"\x00")
 
     async def handle_set_temperature(call):
