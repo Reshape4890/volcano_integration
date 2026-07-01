@@ -53,7 +53,7 @@ SET_TEMPERATURE_SCHEMA = vol.Schema({
 # NEW Services Schemas
 # -------------------------------------------------
 SET_AUTO_SHUTOFF_SCHEMA = vol.Schema({
-    vol.Required("minutes", default=30): vol.All(vol.Coerce(int), vol.Range(min=1, max=240)),
+    vol.Required("minutes", default=30): vol.All(vol.Coerce(int), vol.Range(min=30, max=360)),
 })
 
 SET_LED_BRIGHTNESS_SCHEMA = vol.Schema({

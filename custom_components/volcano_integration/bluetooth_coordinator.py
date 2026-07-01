@@ -504,6 +504,9 @@ class VolcanoBTManager:
 
     async def set_auto_shutoff_setting(self, minutes: int):
         """Write the Auto Shutoff Setting in minutes (converted to seconds)."""
+        if minutes < 30 or minutes > 360:
+            _LOGGER.warning("set_auto_shutoff_setting: clamping %d to [30, 360]", minutes)
+            minutes = max(30, min(360, minutes))
         if not self._connected or not self._client:
             _LOGGER.warning("Cannot set Auto Shutoff Setting - not connected.")
             return

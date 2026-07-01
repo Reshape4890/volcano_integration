@@ -61,8 +61,8 @@ set_auto_shutoff_setting:
       default: 30
       selector:
         number:
-          min: 1
-          max: 240
+          min: 30
+          max: 360
           step: 1
           unit_of_measurement: "min"
 
