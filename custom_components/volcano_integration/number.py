@@ -3,6 +3,7 @@ import logging
 
 from homeassistant.components.number import NumberEntity
 from homeassistant.const import UnitOfTemperature
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory  # For Diagnostics
 from . import DOMAIN
 
@@ -72,6 +73,9 @@ class VolcanoHeaterTempNumber(NumberEntity):
             clamped_val,
         )
         self._temp_value = clamped_val
+        if not await self._manager.wait_for_write_ready():
+            _LOGGER.warning("Heater Temperature Setpoint: no usable connection — write skipped.")
+            raise HomeAssistantError("Volcano: set_heater_temperature failed — connection not ready.")
         await self._manager.set_heater_temperature(clamped_val)
         self.async_write_ha_state()
 
@@ -130,6 +134,9 @@ class VolcanoLEDBrightnessNumber(NumberEntity):
             value,
             brightness_int,
         )
+        if not await self._manager.wait_for_write_ready():
+            _LOGGER.warning("LED Brightness: no usable connection — write skipped.")
+            raise HomeAssistantError("Volcano: set_led_brightness failed — connection not ready.")
         await self._manager.set_led_brightness(brightness_int)
         self.async_write_ha_state()
 
@@ -188,6 +195,9 @@ class VolcanoAutoShutOffMinutesNumber(NumberEntity):
         """Write the new auto shutoff time in minutes to the device."""
         minutes = int(value)
         _LOGGER.debug("User set Auto Shutoff to %d minutes", minutes)
+        if not await self._manager.wait_for_write_ready():
+            _LOGGER.warning("Auto Shutoff Setting: no usable connection — write skipped.")
+            raise HomeAssistantError("Volcano: set_auto_shutoff_setting failed — connection not ready.")
         await self._manager.set_auto_shutoff_setting(minutes)
         self.async_write_ha_state()
 

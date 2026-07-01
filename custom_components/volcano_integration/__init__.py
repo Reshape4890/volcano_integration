@@ -151,6 +151,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         wait = call.data["wait_until_reached"]
 
         _LOGGER.debug(f"Service 'set_temperature' called with temperature={temperature}, wait={wait}")
+        if not await manager.wait_for_write_ready():
+            _LOGGER.warning("set_temperature: no usable connection — write skipped.")
+            raise HomeAssistantError(
+                "Volcano: set_temperature failed — connection not ready."
+            )
         await manager.set_heater_temperature(temperature)
         if wait:
             await wait_for_temperature(hass, manager, temperature)
@@ -223,12 +228,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         """Set the Volcano auto shutoff setting in minutes."""
         minutes = call.data["minutes"]
         _LOGGER.debug(f"Service 'set_auto_shutoff_setting' called with minutes={minutes}")
+        if not await manager.wait_for_write_ready():
+            _LOGGER.warning("set_auto_shutoff_setting: no usable connection — write skipped.")
+            raise HomeAssistantError(
+                "Volcano: set_auto_shutoff_setting failed — connection not ready."
+            )
         await manager.set_auto_shutoff_setting(minutes)
 
     async def handle_set_led_brightness(call):
         """Set the Volcano LED brightness."""
         brightness = call.data["brightness"]
         _LOGGER.debug(f"Service 'set_led_brightness' called with brightness={brightness}")
+        if not await manager.wait_for_write_ready():
+            _LOGGER.warning("set_led_brightness: no usable connection — write skipped.")
+            raise HomeAssistantError(
+                "Volcano: set_led_brightness failed — connection not ready."
+            )
         await manager.set_led_brightness(brightness)
 
     # -------------------------------------------------
