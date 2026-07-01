@@ -90,20 +90,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         """Handle the connect service."""
         _LOGGER.debug("Service 'connect' called.")
         wait = call.data.get("wait_until_connected", True)
-        if not manager._connected:
-            await manager.async_user_connect()
-            if wait:
-                await wait_until_connected(hass, manager)
-        else:
-            _LOGGER.info("Already connected to the device.")
+        await manager.async_user_connect()
+        if wait:
+            await wait_until_connected(hass, manager)
 
     async def handle_disconnect(call):
         """Handle the disconnect service."""
         _LOGGER.debug("Service 'disconnect' called.")
-        if manager._connected:
-            await manager.async_user_disconnect()
-        else:
-            _LOGGER.info("Device already disconnected.")
+        await manager.async_user_disconnect()
 
     async def handle_pump_on(call):
         """Handle the pump_on service."""

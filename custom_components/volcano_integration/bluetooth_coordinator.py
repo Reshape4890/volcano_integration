@@ -74,6 +74,7 @@ class VolcanoBTManager:
         self._temp_poll_task = None
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
+        self._conn_lock = asyncio.Lock()
         self._sensors = []
         self.gatt_ready = False
 
@@ -123,22 +124,30 @@ class VolcanoBTManager:
     async def async_user_connect(self):
         """Explicitly initiate a connection to the BLE device."""
         _LOGGER.debug("User requested connection to the Volcano device.")
-        if self._connected:
-            _LOGGER.info("Already connected to the device.")
-            return
-        if self._run_task and not self._run_task.done():
-            self._reconnect_delay = RECONNECT_INTERVAL
-            self._wake_event.set()
-        else:
-            await self.start()
+        async with self._conn_lock:
+            _LOGGER.debug("async_user_connect: acquired lock")
+            if self._connected:
+                _LOGGER.info("Already connected to the device.")
+                _LOGGER.debug("async_user_connect: released lock")
+                return
+            if self._run_task and not self._run_task.done():
+                self._reconnect_delay = RECONNECT_INTERVAL
+                self._wake_event.set()
+            else:
+                await self.start()
+            _LOGGER.debug("async_user_connect: released lock")
 
     async def async_user_disconnect(self):
         """Explicitly disconnect from the BLE device."""
         _LOGGER.debug("User requested disconnection from the Volcano device.")
-        if not self._connected:
-            _LOGGER.info("Already disconnected from the device.")
-            return
-        await self.stop()
+        async with self._conn_lock:
+            _LOGGER.debug("async_user_disconnect: acquired lock")
+            if not (self._run_task and not self._run_task.done()):
+                _LOGGER.info("Already disconnected from the device.")
+                _LOGGER.debug("async_user_disconnect: released lock")
+                return
+            await self.stop()
+            _LOGGER.debug("async_user_disconnect: released lock")
 
     async def _run(self):
         """Main loop to manage Bluetooth connection."""
