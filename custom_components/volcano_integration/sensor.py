@@ -267,9 +267,14 @@ class VolcanoLEDBrightnessSensor(VolcanoBaseSensor):
         self._attr_unique_id = f"volcano_led_brightness_{self._manager.bt_address}"
         self._attr_icon = "mdi:brightness-5"
         self._attr_device_class = None
-        # CONFIG, not DIAGNOSTIC: grouped with the writable LED Brightness
-        # slider (number.py) rather than the read-only diagnostics below.
-        self._attr_entity_category = EntityCategory.CONFIG
+        # DIAGNOSTIC, not CONFIG: HA rejects entity_category=CONFIG on
+        # SensorEntity (read-only) at entity-registration time — CONFIG is
+        # reserved for settable entities (see the writable LED Brightness
+        # slider in number.py). This was the actual root cause of the
+        # long-standing "LED Brightness unavailable" bug: the entity never
+        # registered at all (confirmed via live HA log: "Entity ... cannot
+        # be added as the entity category is set to config").
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._manager.bt_address)},
             "name": self._config_entry.data.get("device_name", "Volcano Vaporizer"),
@@ -300,7 +305,10 @@ class VolcanoHeaterSetpointSensor(VolcanoBaseSensor):
         self._attr_icon = "mdi:thermometer-lines"
         self._attr_device_class = SensorDeviceClass.TEMPERATURE
         self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-        self._attr_entity_category = EntityCategory.CONFIG
+        # DIAGNOSTIC, not CONFIG: see VolcanoLEDBrightnessSensor above — HA
+        # rejects entity_category=CONFIG on read-only SensorEntity at
+        # registration time.
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._manager.bt_address)},
             "name": self._config_entry.data.get("device_name", "Volcano Vaporizer"),
