@@ -25,6 +25,8 @@ from .const import (
     UUID_LED_BRIGHTNESS,            # LED Brightness
     UUID_HOURS_OF_OPERATION,        # Hours of Operation
     UUID_MINUTES_OF_OPERATION,      # Minutes of Operation
+    UUID_VIBRATION,                 # Vibration
+    UUID_DISPLAY_OFF_ON_COOL,       # Display Off on Cooling
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,6 +45,17 @@ VALID_PATTERNS = {
     (0x23, 0x02): ("ON", "ON (0x02)"),
     (0x23, 0x36): ("ON", "ON (0x36)"),
 }
+
+# Empirically observed full 4-byte register values for the Vibration and
+# Display-Off-on-Cooling settings (GATT dump diffing against the S&B app,
+# 2026-07-01). Both registers use inverted logic: the bits are SET when the
+# setting is off and CLEAR when it's on. Neither register shares bits with
+# any other setting, so writes replace the full 4 bytes rather than a
+# read-modify-write on a shared bitmask.
+VIBRATION_OFF_BYTES = bytes.fromhex("67040100")
+VIBRATION_ON_BYTES = bytes.fromhex("67040000")
+DISPLAY_OFF_ON_COOL_OFF_BYTES = bytes.fromhex("00100100")
+DISPLAY_OFF_ON_COOL_ON_BYTES = bytes.fromhex("00000000")
 
 
 class VolcanoBTManager:
@@ -68,6 +81,8 @@ class VolcanoBTManager:
         self.led_brightness = None
         self.hours_of_operation = None
         self.minutes_of_operation = None
+        self.vibration_enabled = None
+        self.display_off_on_cool = None
 
         self._bt_status = BT_STATUS_DISCONNECTED
         self._run_task = None
@@ -222,6 +237,8 @@ class VolcanoBTManager:
                 await self._read_led_brightness()
                 await self._read_hours_of_operation()
                 await self._read_minutes_of_operation()
+                await self._read_vibration()
+                await self._read_display_off_on_cool()
                 await self._subscribe_pump_notifications()
 
                 # GATT is usable only if characteristic discovery succeeded.
@@ -345,6 +362,52 @@ class VolcanoBTManager:
             else:
                 _LOGGER.warning("Error reading LED Brightness: %s", e)
             self.led_brightness = None
+
+    async def _read_vibration(self):
+        """Read the Vibration setting (inverted-logic 4-byte register)."""
+        if not self._connected or not self._client:
+            _LOGGER.warning("Cannot read Vibration - not connected.")
+            return
+        try:
+            data = await self._client.read_gatt_char(UUID_VIBRATION)
+            if data == VIBRATION_ON_BYTES:
+                self.vibration_enabled = True
+            elif data == VIBRATION_OFF_BYTES:
+                self.vibration_enabled = False
+            else:
+                _LOGGER.warning("Vibration: unrecognized register value %s", data.hex())
+                self.vibration_enabled = None
+            _LOGGER.info("Vibration: %s", self.vibration_enabled)
+            self._notify_sensors()
+        except (BleakError, ValueError, IndexError) as e:
+            if isinstance(e, BleakError) and ("No adapter found" in str(e) or "adapter" in str(e).lower()):
+                _LOGGER.error("Missing bluetooth adapter while reading Vibration: %s", e)
+            else:
+                _LOGGER.warning("Error reading Vibration: %s", e)
+            self.vibration_enabled = None
+
+    async def _read_display_off_on_cool(self):
+        """Read the Display Off on Cooling setting (inverted-logic 4-byte register)."""
+        if not self._connected or not self._client:
+            _LOGGER.warning("Cannot read Display Off on Cooling - not connected.")
+            return
+        try:
+            data = await self._client.read_gatt_char(UUID_DISPLAY_OFF_ON_COOL)
+            if data == DISPLAY_OFF_ON_COOL_ON_BYTES:
+                self.display_off_on_cool = True
+            elif data == DISPLAY_OFF_ON_COOL_OFF_BYTES:
+                self.display_off_on_cool = False
+            else:
+                _LOGGER.warning("Display Off on Cooling: unrecognized register value %s", data.hex())
+                self.display_off_on_cool = None
+            _LOGGER.info("Display Off on Cooling: %s", self.display_off_on_cool)
+            self._notify_sensors()
+        except (BleakError, ValueError, IndexError) as e:
+            if isinstance(e, BleakError) and ("No adapter found" in str(e) or "adapter" in str(e).lower()):
+                _LOGGER.error("Missing bluetooth adapter while reading Display Off on Cooling: %s", e)
+            else:
+                _LOGGER.warning("Error reading Display Off on Cooling: %s", e)
+            self.display_off_on_cool = None
 
     async def _read_hours_of_operation(self):
         """Read the Hours of Operation characteristic."""
@@ -549,5 +612,39 @@ class VolcanoBTManager:
                 _LOGGER.error("Missing bluetooth adapter while writing Auto Shutoff Setting: %s", e)
             else:
                 _LOGGER.warning("Error writing Auto Shutoff Setting: %s", e)
+
+    async def set_vibration(self, enabled: bool):
+        """Write the Vibration setting (inverted-logic 4-byte register)."""
+        if not self._connected or not self._client:
+            _LOGGER.warning("Cannot set Vibration - not connected.")
+            return
+        payload = VIBRATION_ON_BYTES if enabled else VIBRATION_OFF_BYTES
+        try:
+            await self._client.write_gatt_char(UUID_VIBRATION, payload)
+            self.vibration_enabled = enabled
+            self._notify_sensors()
+            _LOGGER.info("Vibration set to %s", enabled)
+        except BleakError as e:
+            if "No adapter found" in str(e) or "adapter" in str(e).lower():
+                _LOGGER.error("Missing bluetooth adapter while writing Vibration: %s", e)
+            else:
+                _LOGGER.warning("Error writing Vibration: %s", e)
+
+    async def set_display_off_on_cool(self, enabled: bool):
+        """Write the Display Off on Cooling setting (inverted-logic 4-byte register)."""
+        if not self._connected or not self._client:
+            _LOGGER.warning("Cannot set Display Off on Cooling - not connected.")
+            return
+        payload = DISPLAY_OFF_ON_COOL_ON_BYTES if enabled else DISPLAY_OFF_ON_COOL_OFF_BYTES
+        try:
+            await self._client.write_gatt_char(UUID_DISPLAY_OFF_ON_COOL, payload)
+            self.display_off_on_cool = enabled
+            self._notify_sensors()
+            _LOGGER.info("Display Off on Cooling set to %s", enabled)
+        except BleakError as e:
+            if "No adapter found" in str(e) or "adapter" in str(e).lower():
+                _LOGGER.error("Missing bluetooth adapter while writing Display Off on Cooling: %s", e)
+            else:
+                _LOGGER.warning("Error writing Display Off on Cooling: %s", e)
 
 

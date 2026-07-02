@@ -22,7 +22,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "button", "number"]
+PLATFORMS = ["sensor", "button", "number", "switch"]
 
 # -------------------------------------------------
 # Existing Service Name Constants
@@ -40,6 +40,8 @@ SERVICE_SET_TEMPERATURE = "set_temperature"
 # -------------------------------------------------
 SERVICE_SET_AUTO_SHUTOFF_SETTING = "set_auto_shutoff_setting"
 SERVICE_SET_LED_BRIGHTNESS = "set_led_brightness"
+SERVICE_SET_VIBRATION = "set_vibration"
+SERVICE_SET_DISPLAY_OFF_ON_COOL = "set_display_off_on_cool"
 
 # -------------------------------------------------
 # Existing set_temperature Schema
@@ -58,6 +60,14 @@ SET_AUTO_SHUTOFF_SCHEMA = vol.Schema({
 
 SET_LED_BRIGHTNESS_SCHEMA = vol.Schema({
     vol.Required("brightness", default=20): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+})
+
+SET_VIBRATION_SCHEMA = vol.Schema({
+    vol.Required("enabled"): cv.boolean,
+})
+
+SET_DISPLAY_OFF_ON_COOL_SCHEMA = vol.Schema({
+    vol.Required("enabled"): cv.boolean,
 })
 
 # CHANGED: Connect Service Schema to 'Required' so the UI shows a checkbox
@@ -240,6 +250,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             )
         await manager.set_led_brightness(brightness)
 
+    async def handle_set_vibration(call):
+        """Set the Volcano Vibration setting."""
+        enabled = call.data["enabled"]
+        _LOGGER.debug(f"Service 'set_vibration' called with enabled={enabled}")
+        if not await manager.wait_for_write_ready():
+            _LOGGER.warning("set_vibration: no usable connection — write skipped.")
+            raise HomeAssistantError(
+                "Volcano: set_vibration failed — connection not ready."
+            )
+        await manager.set_vibration(enabled)
+
+    async def handle_set_display_off_on_cool(call):
+        """Set the Volcano Display Off on Cooling setting."""
+        enabled = call.data["enabled"]
+        _LOGGER.debug(f"Service 'set_display_off_on_cool' called with enabled={enabled}")
+        if not await manager.wait_for_write_ready():
+            _LOGGER.warning("set_display_off_on_cool: no usable connection — write skipped.")
+            raise HomeAssistantError(
+                "Volcano: set_display_off_on_cool failed — connection not ready."
+            )
+        await manager.set_display_off_on_cool(enabled)
+
     # -------------------------------------------------
     # Register All Services
     # -------------------------------------------------
@@ -257,6 +289,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
     hass.services.async_register(
         DOMAIN, SERVICE_SET_LED_BRIGHTNESS, handle_set_led_brightness, schema=SET_LED_BRIGHTNESS_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_VIBRATION, handle_set_vibration, schema=SET_VIBRATION_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_DISPLAY_OFF_ON_COOL, handle_set_display_off_on_cool, schema=SET_DISPLAY_OFF_ON_COOL_SCHEMA
     )
 
     # IMPORTANT: No auto-connect call here -> user must trigger connect
@@ -280,6 +318,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     hass.services.async_remove(DOMAIN, SERVICE_SET_TEMPERATURE)
     hass.services.async_remove(DOMAIN, SERVICE_SET_AUTO_SHUTOFF_SETTING)
     hass.services.async_remove(DOMAIN, SERVICE_SET_LED_BRIGHTNESS)
+    hass.services.async_remove(DOMAIN, SERVICE_SET_VIBRATION)
+    hass.services.async_remove(DOMAIN, SERVICE_SET_DISPLAY_OFF_ON_COOL)
 
     await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     return True

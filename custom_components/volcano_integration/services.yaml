@@ -80,3 +80,23 @@ set_led_brightness:
           max: 100
           step: 1
           unit_of_measurement: "%"
+
+set_vibration:
+  description: "Enable or disable Vibration on the Volcano."
+  fields:
+    enabled:
+      name: "Enabled"
+      description: "Whether Vibration should be turned on."
+      required: true
+      selector:
+        boolean: {}
+
+set_display_off_on_cool:
+  description: "Enable or disable Display Off on Cooling on the Volcano."
+  fields:
+    enabled:
+      name: "Enabled"
+      description: "Whether Display Off on Cooling should be turned on."
+      required: true
+      selector:
+        boolean: {}
