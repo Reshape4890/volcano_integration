@@ -27,6 +27,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         VolcanoFirmwareVersionSensor(manager, entry),
         # VolcanoAutoShutOffSensor(manager, entry),  <-- REMOVED
         VolcanoLEDBrightnessSensor(manager, entry),
+        VolcanoHeaterSetpointSensor(manager, entry),
         VolcanoHoursOfOperationSensor(manager, entry),
         VolcanoMinutesOfOperationSensor(manager, entry),
     ]
@@ -287,6 +288,37 @@ class VolcanoLEDBrightnessSensor(VolcanoBaseSensor):
     @property
     def available(self):
         return (self._manager.bt_status == "CONNECTED" and self._manager.led_brightness is not None)
+
+
+class VolcanoHeaterSetpointSensor(VolcanoBaseSensor):
+    """Sensor to display the Heater Setpoint (read-only mirror of the write-only slider)."""
+
+    def __init__(self, manager, config_entry):
+        super().__init__(manager, config_entry)
+        self._attr_name = "Volcano Heater Setpoint"
+        self._attr_unique_id = f"volcano_heater_setpoint_{self._manager.bt_address}"
+        self._attr_icon = "mdi:thermometer-lines"
+        self._attr_device_class = SensorDeviceClass.TEMPERATURE
+        self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+        self._attr_entity_category = EntityCategory.CONFIG
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, self._manager.bt_address)},
+            "name": self._config_entry.data.get("device_name", "Volcano Vaporizer"),
+            "manufacturer": "Storz & Bickel",
+            "model": "Volcano Hybrid Vaporizer",
+            "sw_version": "1.0.0",
+            "via_device": None,
+        }
+
+    @property
+    def native_value(self):
+        val = self._manager.heater_setpoint
+        _LOGGER.debug("%s: native_value -> '%s'", type(self).__name__, val)
+        return val
+
+    @property
+    def available(self):
+        return (self._manager.bt_status == "CONNECTED" and self._manager.heater_setpoint is not None)
 
 
 class VolcanoHoursOfOperationSensor(VolcanoBaseSensor):

@@ -112,6 +112,7 @@ class VolcanoBTManager:
         self.firmware_version = None
         self.auto_shut_off_setting = None
         self.led_brightness = None
+        self.heater_setpoint = None
         self.hours_of_operation = None
         self.minutes_of_operation = None
         self.vibration_enabled = None
@@ -267,6 +268,7 @@ class VolcanoBTManager:
                 await self._read_serial_number()
                 await self._read_firmware_version()
                 await self._read_auto_shut_off_setting()
+                await self._read_heater_setpoint()
                 await self._read_led_brightness()
                 await self._read_hours_of_operation()
                 await self._read_minutes_of_operation()
@@ -375,6 +377,37 @@ class VolcanoBTManager:
             else:
                 _LOGGER.warning("Error reading Auto Shutoff Setting: %s", e)
             self.auto_shut_off_setting = None
+
+    async def _read_heater_setpoint(self):
+        """Read the Heater Setpoint characteristic (2-byte: °C * 10, little-endian).
+
+        Scaling is the inverse of set_heater_temperature's confirmed write
+        encoding (temp_c * 10). Provisional until confirmed against the raw
+        hex log on first live read — this UUID has no prior read history.
+        """
+        if not self._connected or not self._client:
+            _LOGGER.warning("Cannot read Heater Setpoint - not connected.")
+            return
+        try:
+            data = await self._client.read_gatt_char(UUID_HEATER_SETPOINT)
+            _LOGGER.info("Heater Setpoint raw bytes: %s (len=%d)", data.hex(), len(data))
+            if len(data) >= 2:
+                raw = int.from_bytes(data[:2], byteorder="little")
+                self.heater_setpoint = raw / 10
+                _LOGGER.info("Heater Setpoint: %s °C", self.heater_setpoint)
+            else:
+                self.heater_setpoint = None
+                _LOGGER.warning(
+                    "Heater Setpoint: short read (expected >=2 bytes) — raw: %s",
+                    data.hex(),
+                )
+            self._notify_sensors()
+        except BleakError as e:
+            if "No adapter found" in str(e) or "adapter" in str(e).lower():
+                _LOGGER.error("Missing bluetooth adapter while reading Heater Setpoint: %s", e)
+            else:
+                _LOGGER.warning("Error reading Heater Setpoint: %s", e)
+            self.heater_setpoint = None
 
     async def _read_led_brightness(self):
         """Read the LED Brightness characteristic (0–100)."""
