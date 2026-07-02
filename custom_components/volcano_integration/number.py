@@ -4,7 +4,7 @@ import logging
 from homeassistant.components.number import NumberEntity
 from homeassistant.const import UnitOfTemperature
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import EntityCategory  # For Diagnostics
+from homeassistant.helpers.entity import EntityCategory
 from . import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ class VolcanoLEDBrightnessNumber(NumberEntity):
             "sw_version": "1.0.0",
             "via_device": None,
         }
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = EntityCategory.CONFIG
         # LED Brightness range 0–100
         self._attr_native_min_value = 0
         self._attr_native_max_value = 100
@@ -172,7 +172,7 @@ class VolcanoAutoShutOffMinutesNumber(NumberEntity):
             "sw_version": "1.0.0",
             "via_device": None,
         }
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = EntityCategory.CONFIG
         # Updated range: 30–360 minutes
         self._attr_native_min_value = 30
         self._attr_native_max_value = 360

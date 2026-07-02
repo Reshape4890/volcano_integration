@@ -46,16 +46,49 @@ VALID_PATTERNS = {
     (0x23, 0x36): ("ON", "ON (0x36)"),
 }
 
-# Empirically observed full 4-byte register values for the Vibration and
+# Empirically observed 4-byte register values for the Vibration and
 # Display-Off-on-Cooling settings (GATT dump diffing against the S&B app,
 # 2026-07-01). Both registers use inverted logic: the bits are SET when the
 # setting is off and CLEAR when it's on. Neither register shares bits with
 # any other setting, so writes replace the full 4 bytes rather than a
 # read-modify-write on a shared bitmask.
-VIBRATION_OFF_BYTES = bytes.fromhex("67040100")
-VIBRATION_ON_BYTES = bytes.fromhex("67040000")
+#
+# Reads only compare a subset of bytes, not the full 4. Post-deploy field
+# data (2026-07-01, same day) showed byte 0 of the Vibration register drifts
+# independently of the on/off state (0x67 and 0x27 both observed paired with
+# both ON and OFF byte[1:4] patterns, 7+ samples, zero exceptions) — some
+# other status/counter bit shares that byte. Comparing the full 4 bytes
+# caused real reads to fall through to "unrecognized" and made the switch
+# appear stuck off. Byte 2 of the Display-Off-on-Cooling register showed the
+# same kind of drift once (weaker evidence, single sample, captured during a
+# BLE flap) so it's excluded too, pending more data.
+VIBRATION_OFF_SUFFIX = bytes.fromhex("040100")  # bytes[1:4] when off
+VIBRATION_ON_SUFFIX = bytes.fromhex("000000")   # bytes[1:4] when on
+
+# byte[1] of the Display Off on Cooling register is a bitfield, not a clean
+# 2-value enum: confirmed 2026-07-01 that an independent status bit (0x08,
+# possibly a live "currently cooling" indicator) can be set or clear
+# regardless of the on/off bit (0x18 and 0x08 both observed as valid
+# "off"/"on" once that bit is masked out). Reads must check only this bit,
+# not compare the full byte, the same lesson as Vibration's byte 0 drift.
+DISPLAY_OFF_ON_COOL_OFF_BYTE1 = 0x10  # bit set in byte[1] when off; used as both the exact write-validation target and the read bitmask
+
+# Full write-command bytes, captured 2026-07-01 directly from the S&B web
+# app's own Web Bluetooth GATT writes (Chrome DevTools console monkeypatch on
+# BluetoothRemoteGATTCharacteristic.prototype.writeValue) - ground truth, not
+# guessed. Confirms write and read encodings are NOT symmetric for either
+# characteristic: byte[0] is always 0x00 in the app's write command (earlier
+# VIBRATION_OFF/ON_BYTES wrongly hardcoded a drifted byte[0]=0x67 captured
+# from a read, which is the leading theory for why toggling Vibration
+# disabled the device's Bluetooth radio instead of controlling vibration).
+# For Display Off on Cooling specifically, byte[1] is fixed at 0x10 in every
+# write regardless of target state - the read-side byte[1] on/off indicator
+# (DISPLAY_OFF_ON_COOL_ON/OFF_BYTE1 above) does not apply to writes; the
+# write's actual toggle bit is byte[2] (0x00=on, 0x01=off).
+VIBRATION_OFF_BYTES = bytes.fromhex("00040100")
+VIBRATION_ON_BYTES = bytes.fromhex("00040000")
 DISPLAY_OFF_ON_COOL_OFF_BYTES = bytes.fromhex("00100100")
-DISPLAY_OFF_ON_COOL_ON_BYTES = bytes.fromhex("00000000")
+DISPLAY_OFF_ON_COOL_ON_BYTES = bytes.fromhex("00100000")
 
 
 class VolcanoBTManager:
@@ -370,9 +403,10 @@ class VolcanoBTManager:
             return
         try:
             data = await self._client.read_gatt_char(UUID_VIBRATION)
-            if data == VIBRATION_ON_BYTES:
+            suffix = data[1:4]
+            if suffix == VIBRATION_ON_SUFFIX:
                 self.vibration_enabled = True
-            elif data == VIBRATION_OFF_BYTES:
+            elif suffix == VIBRATION_OFF_SUFFIX:
                 self.vibration_enabled = False
             else:
                 _LOGGER.warning("Vibration: unrecognized register value %s", data.hex())
@@ -387,19 +421,23 @@ class VolcanoBTManager:
             self.vibration_enabled = None
 
     async def _read_display_off_on_cool(self):
-        """Read the Display Off on Cooling setting (inverted-logic 4-byte register)."""
+        """Read the Display Off on Cooling setting (inverted-logic 4-byte register).
+
+        byte[1] carries the on/off indicator on the DISPLAY_OFF_ON_COOL_OFF_BYTE1
+        bit (0x10) but is not a clean 2-value enum - confirmed 2026-07-01 that
+        an independent status bit (0x08, possibly a live "currently cooling"
+        flag) can be set or clear independently of the on/off bit, e.g. 0x18
+        and 0x08 are both valid "off"/"on" states once that bit is masked
+        out. Checking only the 0x10 bit avoids misreading those combinations
+        as "unrecognized" the way an exact 0x00/0x10 equality check did.
+        """
         if not self._connected or not self._client:
             _LOGGER.warning("Cannot read Display Off on Cooling - not connected.")
             return
         try:
             data = await self._client.read_gatt_char(UUID_DISPLAY_OFF_ON_COOL)
-            if data == DISPLAY_OFF_ON_COOL_ON_BYTES:
-                self.display_off_on_cool = True
-            elif data == DISPLAY_OFF_ON_COOL_OFF_BYTES:
-                self.display_off_on_cool = False
-            else:
-                _LOGGER.warning("Display Off on Cooling: unrecognized register value %s", data.hex())
-                self.display_off_on_cool = None
+            byte1 = data[1]
+            self.display_off_on_cool = not bool(byte1 & DISPLAY_OFF_ON_COOL_OFF_BYTE1)
             _LOGGER.info("Display Off on Cooling: %s", self.display_off_on_cool)
             self._notify_sensors()
         except (BleakError, ValueError, IndexError) as e:
@@ -631,13 +669,27 @@ class VolcanoBTManager:
                 _LOGGER.warning("Error writing Vibration: %s", e)
 
     async def set_display_off_on_cool(self, enabled: bool):
-        """Write the Display Off on Cooling setting (inverted-logic 4-byte register)."""
+        """Write the Display Off on Cooling setting using the app-confirmed write command.
+
+        Write and read encodings are NOT symmetric for this characteristic
+        (confirmed 2026-07-01 via a Chrome DevTools capture of the S&B app's
+        own Web Bluetooth writes): the write command holds byte[1] fixed at
+        0x10 regardless of target state, with byte[2] as the actual toggle
+        bit - unrelated to the byte[1]-based on/off indicator used on reads.
+        """
         if not self._connected or not self._client:
             _LOGGER.warning("Cannot set Display Off on Cooling - not connected.")
             return
         payload = DISPLAY_OFF_ON_COOL_ON_BYTES if enabled else DISPLAY_OFF_ON_COOL_OFF_BYTES
         try:
             await self._client.write_gatt_char(UUID_DISPLAY_OFF_ON_COOL, payload)
+            after = await self._client.read_gatt_char(UUID_DISPLAY_OFF_ON_COOL)
+            off_bit_set = bool(after[1] & DISPLAY_OFF_ON_COOL_OFF_BYTE1)
+            if off_bit_set == enabled:
+                _LOGGER.warning(
+                    "Display Off on Cooling: write did not take - byte[1] is %s, off-bit set=%s, expected enabled=%s",
+                    hex(after[1]), off_bit_set, enabled,
+                )
             self.display_off_on_cool = enabled
             self._notify_sensors()
             _LOGGER.info("Display Off on Cooling set to %s", enabled)
@@ -646,5 +698,4 @@ class VolcanoBTManager:
                 _LOGGER.error("Missing bluetooth adapter while writing Display Off on Cooling: %s", e)
             else:
                 _LOGGER.warning("Error writing Display Off on Cooling: %s", e)
-
 

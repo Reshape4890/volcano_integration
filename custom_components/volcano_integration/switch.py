@@ -3,7 +3,7 @@ import logging
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import EntityCategory  # For Diagnostics
+from homeassistant.helpers.entity import EntityCategory
 from . import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class VolcanoVibrationSwitch(SwitchEntity):
             "sw_version": "1.0.0",
             "via_device": None,
         }
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def is_on(self):
@@ -85,7 +85,7 @@ class VolcanoDisplayOffOnCoolSwitch(SwitchEntity):
         super().__init__()
         self._manager = manager
         self._config_entry = config_entry
-        self._attr_name = "Volcano Display Off on Cooling"
+        self._attr_name = "Volcano Display On Cooling"
         self._attr_unique_id = f"volcano_display_off_on_cool_{self._manager.bt_address}"
         self._attr_icon = "mdi:monitor-off"
         self._attr_device_info = {
@@ -96,7 +96,7 @@ class VolcanoDisplayOffOnCoolSwitch(SwitchEntity):
             "sw_version": "1.0.0",
             "via_device": None,
         }
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def is_on(self):

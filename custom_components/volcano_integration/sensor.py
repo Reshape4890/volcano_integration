@@ -266,7 +266,9 @@ class VolcanoLEDBrightnessSensor(VolcanoBaseSensor):
         self._attr_unique_id = f"volcano_led_brightness_{self._manager.bt_address}"
         self._attr_icon = "mdi:brightness-5"
         self._attr_device_class = None
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        # CONFIG, not DIAGNOSTIC: grouped with the writable LED Brightness
+        # slider (number.py) rather than the read-only diagnostics below.
+        self._attr_entity_category = EntityCategory.CONFIG
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._manager.bt_address)},
             "name": self._config_entry.data.get("device_name", "Volcano Vaporizer"),
