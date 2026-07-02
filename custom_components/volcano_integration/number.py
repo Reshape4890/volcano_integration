@@ -126,8 +126,8 @@ class VolcanoLEDBrightnessNumber(NumberEntity):
 
     @property
     def available(self):
-        """Available only when Bluetooth is connected."""
-        return self._manager.bt_status == "CONNECTED"
+        """Available only when Bluetooth is connected and the read has succeeded."""
+        return self._manager.bt_status == "CONNECTED" and self._manager.led_brightness is not None
 
     async def async_set_native_value(self, value: float) -> None:
         step_int = int(max(0, min(round(value), 10)))

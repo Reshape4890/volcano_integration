@@ -383,11 +383,16 @@ class VolcanoBTManager:
             return
         try:
             data = await self._client.read_gatt_char(UUID_LED_BRIGHTNESS)
+            _LOGGER.info("LED Brightness raw bytes: %s (len=%d)", data.hex(), len(data))
             if len(data) >= 2:
                 self.led_brightness = int.from_bytes(data[:2], byteorder="little")
+                _LOGGER.info("LED Brightness: %s%%", self.led_brightness)
             else:
                 self.led_brightness = None
-            _LOGGER.info("LED Brightness: %s%%", self.led_brightness)
+                _LOGGER.warning(
+                    "LED Brightness: short read (expected >=2 bytes) — raw: %s",
+                    data.hex(),
+                )
             self._notify_sensors()
         except BleakError as e:
             if "No adapter found" in str(e) or "adapter" in str(e).lower():
