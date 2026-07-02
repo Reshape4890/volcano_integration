@@ -109,17 +109,19 @@ class VolcanoLEDBrightnessNumber(NumberEntity):
             "via_device": None,
         }
         self._attr_entity_category = EntityCategory.CONFIG
-        # LED Brightness range 0–100
+        # Device exposes 11 snap points (0-10), each written as raw*10 (0-100)
+        # over GATT. Confirmed via S&B app write capture 2026-07-01: 0x00,
+        # 0x0a, 0x14, ... 0x64 (steps 0-10 -> raw 0,10,20,...,100).
         self._attr_native_min_value = 0
-        self._attr_native_max_value = 100
+        self._attr_native_max_value = 10
         self._attr_native_step = 1
-        self._attr_unit_of_measurement = "%"
+        self._attr_unit_of_measurement = None
 
     @property
     def native_value(self):
-        # Return the current brightness stored by the manager
+        # Manager stores the raw 0-100 value; expose as the app's 0-10 step
         if self._manager.led_brightness is not None:
-            return self._manager.led_brightness
+            return round(self._manager.led_brightness / 10)
         return 0
 
     @property
@@ -128,10 +130,12 @@ class VolcanoLEDBrightnessNumber(NumberEntity):
         return self._manager.bt_status == "CONNECTED"
 
     async def async_set_native_value(self, value: float) -> None:
-        brightness_int = int(max(0, min(value, 100)))
+        step_int = int(max(0, min(round(value), 10)))
+        brightness_int = step_int * 10
         _LOGGER.debug(
-            "User set LED Brightness to %.1f -> clamped=%d",
+            "User set LED Brightness to step %.1f -> clamped step=%d, raw=%d",
             value,
+            step_int,
             brightness_int,
         )
         if not await self._manager.wait_for_write_ready():

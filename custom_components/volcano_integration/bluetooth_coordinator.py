@@ -383,8 +383,8 @@ class VolcanoBTManager:
             return
         try:
             data = await self._client.read_gatt_char(UUID_LED_BRIGHTNESS)
-            if data:
-                self.led_brightness = data[0]
+            if len(data) >= 2:
+                self.led_brightness = int.from_bytes(data[:2], byteorder="little")
             else:
                 self.led_brightness = None
             _LOGGER.info("LED Brightness: %s%%", self.led_brightness)
@@ -616,7 +616,7 @@ class VolcanoBTManager:
             _LOGGER.warning("Cannot set LED Brightness - not connected.")
             return
         clamped_brightness = max(0, min(brightness, 100))
-        payload = clamped_brightness.to_bytes(1, byteorder="little")
+        payload = clamped_brightness.to_bytes(2, byteorder="little")
         try:
             await self._client.write_gatt_char(UUID_LED_BRIGHTNESS, payload)
             self.led_brightness = clamped_brightness
