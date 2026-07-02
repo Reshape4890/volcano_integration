@@ -54,11 +54,11 @@ class VolcanoHeaterTempNumber(NumberEntity):
         self._attr_native_step = STEP
         self._attr_unit_of_measurement = UnitOfTemperature.CELSIUS
 
-        self._temp_value = DEFAULT_TEMP
-
     @property
     def native_value(self):
-        return self._temp_value
+        if self._manager.heater_setpoint is not None:
+            return self._manager.heater_setpoint
+        return DEFAULT_TEMP
 
     @property
     def available(self):
@@ -72,7 +72,6 @@ class VolcanoHeaterTempNumber(NumberEntity):
             value,
             clamped_val,
         )
-        self._temp_value = clamped_val
         if not await self._manager.wait_for_write_ready():
             _LOGGER.warning("Heater Temperature Setpoint: no usable connection — write skipped.")
             raise HomeAssistantError("Volcano: set_heater_temperature failed — connection not ready.")

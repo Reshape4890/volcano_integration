@@ -641,6 +641,8 @@ class VolcanoBTManager:
         payload = int(safe_temp * 10).to_bytes(2, byteorder="little")
         try:
             await self._client.write_gatt_char(UUID_HEATER_SETPOINT, payload)
+            self.heater_setpoint = safe_temp
+            self._notify_sensors()
             _LOGGER.info("Heater temperature set to %.1f °C.", safe_temp)
         except BleakError as e:
             if "No adapter found" in str(e) or "adapter" in str(e).lower():
